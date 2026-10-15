@@ -33,6 +33,9 @@ abort() {
 confirm() {
     local prompt="$1" enter_return=$2 reply
 
+    # No terminal: never guess an answer - stop with an error
+    { : < /dev/tty; } 2> /dev/null || abort "Can't ask without a terminal: $prompt"
+
     while true; do
         printf '%s' "$prompt" > /dev/tty
         IFS= read -rn1 reply < /dev/tty
