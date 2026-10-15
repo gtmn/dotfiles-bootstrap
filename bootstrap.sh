@@ -11,8 +11,9 @@
 
 DOTFILES_REPO_URL="${DOTFILES_REPO_URL:-git@github.com:gtmn/dotfiles}"
 DOTFILES_DIR="$HOME/Developer/dotfiles"
+TILDE='~' # for ${path/#$HOME/$TILDE}: a literal ~ there works in bash 3.2 but becomes $HOME again in bash 5
 SSH_KEY_FILE="$HOME/.ssh/id_ed25519_personal"     # same key name as the "personal" context
-MACHINE_FILE="$HOME/.config/contexts/.machine"     # Mac label, shared with scripts/contexts.sh
+MACHINE_FILE="$HOME/.config/contexts/.machine"     # Mac label, shared with dots/lib/contexts.sh
 
 # shellcheck disable=SC2292
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -96,7 +97,7 @@ command -v brew &> /dev/null || abort "Homebrew is required to continue."
 mkdir -p -m 700 "$HOME/.ssh"
 
 if [[ -f "$SSH_KEY_FILE" ]]; then
-    echo "Using existing SSH key ${SSH_KEY_FILE/#$HOME/~}"
+    echo "Using existing SSH key ${SSH_KEY_FILE/#$HOME/$TILDE}"
 else
     machine=$(ask_for_value "Label for this Mac (shown in the SSH key comment)" "$(hostname -s)")
     mkdir -p -m 700 "$(dirname "$MACHINE_FILE")" && echo "$machine" > "$MACHINE_FILE"
@@ -106,8 +107,8 @@ else
 fi
 
 # Machine-specific hosts live in config.local, which the dotfiles' ~/.ssh/config includes later
-if ! grep -qs "IdentityFile ${SSH_KEY_FILE/#$HOME/~}" "$HOME/.ssh/config.local"; then
-    printf 'Host github.com\n    IdentityFile %s\n' "${SSH_KEY_FILE/#$HOME/~}" >> "$HOME/.ssh/config.local"
+if ! grep -qs "IdentityFile ${SSH_KEY_FILE/#$HOME/$TILDE}" "$HOME/.ssh/config.local"; then
+    printf 'Host github.com\n    IdentityFile %s\n' "${SSH_KEY_FILE/#$HOME/$TILDE}" >> "$HOME/.ssh/config.local"
 fi
 if [[ ! -e "$HOME/.ssh/config" ]]; then
     echo "Include ~/.ssh/config.local" > "$HOME/.ssh/config"
@@ -131,12 +132,18 @@ echo "SSH connection to GitHub works"
 # ====================================================================================================
 
 if [[ -d "$DOTFILES_DIR/.git" ]]; then
-    confirm_yes "Pull latest dotfiles in ${DOTFILES_DIR/#$HOME/~}?" && git -C "$DOTFILES_DIR" pull
+    confirm_yes "Pull latest dotfiles in ${DOTFILES_DIR/#$HOME/$TILDE}?" && git -C "$DOTFILES_DIR" pull
 else
-    confirm_yes "Clone dotfiles to ${DOTFILES_DIR/#$HOME/~}?" &&
+    confirm_yes "Clone dotfiles to ${DOTFILES_DIR/#$HOME/$TILDE}?" &&
         mkdir -p "$(dirname "$DOTFILES_DIR")" &&
         git clone "$DOTFILES_REPO_URL" "$DOTFILES_DIR"
 fi
 
-[[ -f "$DOTFILES_DIR/setup/setup.sh" ]] || abort "Dotfiles not found in $DOTFILES_DIR"
-confirm_yes "Run the dotfiles setup?" && bash "$DOTFILES_DIR/setup/setup.sh"
+# dots/dots since the tool/data split; setup/setup.sh in older versions of the dotfiles
+if [[ -x "$DOTFILES_DIR/dots/dots" ]]; then
+    confirm_yes "Run the dotfiles setup?" && "$DOTFILES_DIR/dots/dots" setup
+elif [[ -f "$DOTFILES_DIR/setup/setup.sh" ]]; then
+    confirm_yes "Run the dotfiles setup?" && bash "$DOTFILES_DIR/setup/setup.sh"
+else
+    abort "Dotfiles not found in $DOTFILES_DIR"
+fi

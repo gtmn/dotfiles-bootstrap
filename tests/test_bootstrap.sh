@@ -64,6 +64,12 @@ check "exits cleanly" test "$rc" -eq 0
 check "dotfiles cloned to ~/Developer/dotfiles" test -f "$H/Developer/dotfiles/setup/setup.sh"
 check "setup.sh ran" grep -q SETUP-RAN "$H/setup-ran"
 
+echo; echo "### New layout: dots/dots setup is preferred"
+mkdir -p "$S/seed/dots" && printf '#!/usr/bin/env bash\necho "DOTS-RAN $*" > "$HOME/dots-ran"\n' > "$S/seed/dots/dots" && chmod +x "$S/seed/dots/dots"
+git -C "$S/seed" add -A && git -C "$S/seed" -c user.name=t -c user.email=t@t commit -qm layout && git -C "$S/seed" push -q origin HEAD 2> /dev/null
+run_boot "$H" "$S/stubs-ok" "DOTFILES_REPO_URL=$S/remote.git" "Pull latest dotfiles=>y" "Run the dotfiles setup=>y"
+check "dots/dots setup ran instead of setup/setup.sh" bash -c "grep -qx 'DOTS-RAN setup' '$H/dots-ran'"
+
 echo; echo "### Result: $pass passed, $fail failed"
 if ((fail == 0)); then
     [[ -n $S && -d $S ]] && rm -rf -- "$S"
