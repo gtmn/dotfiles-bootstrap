@@ -102,7 +102,7 @@ else
     machine=$(ask_for_value "Label for this Mac (shown in the SSH key comment)" "$(hostname -s)")
     mkdir -p -m 700 "$(dirname "$MACHINE_FILE")" && echo "$machine" > "$MACHINE_FILE"
 
-    ssh-keygen -t ed25519 -f "$SSH_KEY_FILE" -C "personal@$machine" || abort "Could not create the SSH key."
+    ssh-keygen -t ed25519 -f "$SSH_KEY_FILE" -C "personal@$machine $(date +%Y-%m)" || abort "Could not create the SSH key."
     ssh-add --apple-use-keychain "$SSH_KEY_FILE"
 fi
 

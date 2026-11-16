@@ -39,7 +39,7 @@ run_boot "$H" "$S/stubs-denied" "" \
     "Copy it to the clipboard=>n" "Open GitHub=>n" "test the connection again=>n"
 rc=$?
 check "stops with an error when the key isn't on GitHub yet" test "$rc" -eq 1
-check "key ~/.ssh/id_ed25519_personal with comment personal@testmac" grep -q 'personal@testmac$' "$H/.ssh/id_ed25519_personal.pub"
+check "key ~/.ssh/id_ed25519_personal with comment personal@testmac YYYY-MM" grep -qE 'personal@testmac [0-9]{4}-[0-9]{2}$' "$H/.ssh/id_ed25519_personal.pub"
 check "Mac label shared with contexts.sh" grep -qx testmac "$H/.config/contexts/.machine"
 check "~/.ssh is 700, config files 600" bash -c "[[ \$(stat -f %Lp '$H/.ssh') == 700 && \$(stat -f %Lp '$H/.ssh/config') == 600 && \$(stat -f %Lp '$H/.ssh/config.local') == 600 ]]"
 check "config.local has github.com with the new key" bash -c "grep -q '^Host github.com' '$H/.ssh/config.local' && grep -q 'IdentityFile ~/.ssh/id_ed25519_personal' '$H/.ssh/config.local'"
