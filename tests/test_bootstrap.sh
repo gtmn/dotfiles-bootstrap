@@ -36,11 +36,11 @@ H="$S/home1"; mkdir -p "$H"
 make_stubs "$S/stubs-denied" "git@github.com: Permission denied (publickey)."
 run_boot "$H" "$S/stubs-denied" "" \
     "Label for this Mac=>testmac\r" "Enter passphrase=>\r" "Enter same passphrase=>\r" \
-    "Copy it to the clipboard=>n" "Open GitHub=>n" "test the connection again=>n"
+    "Title: personal@testmac 20=>" "Copy it to the clipboard=>n" "Open GitHub=>n" "test the connection again=>n"
 rc=$?
 check "stops with an error when the key isn't on GitHub yet" test "$rc" -eq 1
 check "key ~/.ssh/id_ed25519_personal with comment personal@testmac YYYY-MM" grep -qE 'personal@testmac [0-9]{4}-[0-9]{2}$' "$H/.ssh/id_ed25519_personal.pub"
-check "Mac label shared with contexts.sh" grep -qx testmac "$H/.config/contexts/.machine"
+check "no Mac label file before a dots repo is cloned" test ! -e "$H/.config/contexts/.machine"
 check "~/.ssh is 700, config files 600" bash -c "[[ \$(stat -f %Lp '$H/.ssh') == 700 && \$(stat -f %Lp '$H/.ssh/config') == 600 && \$(stat -f %Lp '$H/.ssh/config.local') == 600 ]]"
 check "config.local has github.com with the new key" bash -c "grep -q '^Host github.com' '$H/.ssh/config.local' && grep -q 'IdentityFile ~/.ssh/id_ed25519_personal' '$H/.ssh/config.local'"
 check "~/.ssh/config includes config.local" grep -qx 'Include ~/.ssh/config.local' "$H/.ssh/config"
@@ -63,12 +63,48 @@ rc=$?
 check "exits cleanly" test "$rc" -eq 0
 check "dotfiles cloned to ~/Developer/dotfiles" test -f "$H/Developer/dotfiles/setup/setup.sh"
 check "setup.sh ran" grep -q SETUP-RAN "$H/setup-ran"
+check "no Mac label file for a repo without dots" test ! -e "$H/.config/contexts/.machine"
 
 echo; echo "### New layout: dots/dots setup is preferred"
 mkdir -p "$S/seed/dots" && printf '#!/usr/bin/env bash\necho "DOTS-RAN $*" > "$HOME/dots-ran"\n' > "$S/seed/dots/dots" && chmod +x "$S/seed/dots/dots"
 git -C "$S/seed" add -A && git -C "$S/seed" -c user.name=t -c user.email=t@t commit -qm layout && git -C "$S/seed" push -q origin HEAD 2> /dev/null
 run_boot "$H" "$S/stubs-ok" "DOTFILES_REPO_URL=$S/remote.git" "Pull latest dotfiles=>y" "Run the dotfiles setup=>y"
 check "dots/dots setup ran instead of setup/setup.sh" bash -c "grep -qx 'DOTS-RAN setup' '$H/dots-ran'"
+check "Mac label from the key comment shared with contexts.sh" grep -qx testmac "$H/.config/contexts/.machine"
+
+new_remote() { # <name> <file> <content>: bare repo with one file, prints its path
+    git init -q --bare "$S/$1.git"
+    git clone -q "$S/$1.git" "$S/$1-seed" 2> /dev/null
+    mkdir -p "$(dirname "$S/$1-seed/$2")" && printf '%s' "$3" > "$S/$1-seed/$2"
+    git -C "$S/$1-seed" add -A && git -C "$S/$1-seed" -c user.name=t -c user.email=t@t commit -qm init
+    git -C "$S/$1-seed" push -q origin HEAD 2> /dev/null
+    echo "$S/$1.git"
+}
+
+echo; echo "### Someone else's dotfiles: own folder, key name & label, install.sh"
+H2="$S/home2"; mkdir -p "$H2"
+other=$(new_remote other install.sh $'#!/usr/bin/env bash\npwd > "$HOME/install-ran"\n')
+run_boot "$H2" "$S/stubs-ok" "DOTFILES_REPO_URL=$other DOTFILES_DIR=$H2/code/dotfiles SSH_KEY_NAME=id_ed25519_me SSH_KEY_LABEL=me" \
+    "Label for this Mac=>othermac\r" "Enter passphrase=>\r" "Enter same passphrase=>\r" \
+    "Clone dotfiles=>y" "Run the dotfiles setup (install.sh)=>y"
+rc=$?
+check "exits cleanly" test "$rc" -eq 0
+check "key ~/.ssh/id_ed25519_me with comment me@othermac YYYY-MM" grep -qE 'me@othermac [0-9]{4}-[0-9]{2}$' "$H2/.ssh/id_ed25519_me.pub"
+check "no personal key made" test ! -e "$H2/.ssh/id_ed25519_personal"
+check "config.local has github.com with that key" grep -q 'IdentityFile ~/.ssh/id_ed25519_me' "$H2/.ssh/config.local"
+check "cloned to DOTFILES_DIR" test -f "$H2/code/dotfiles/install.sh"
+check "install.sh ran inside the repo" grep -qx "$H2/code/dotfiles" "$H2/install-ran"
+check "no Mac label file (not a dots repo)" test ! -e "$H2/.config/contexts/.machine"
+
+echo; echo "### Repo without a setup script: clone only"
+H3="$S/home3"; mkdir -p "$H3"
+bare=$(new_remote bare README.md "just files")
+run_boot "$H3" "$S/stubs-ok" "DOTFILES_REPO_URL=$bare" \
+    "Label for this Mac=>m3\r" "Enter passphrase=>\r" "Enter same passphrase=>\r" \
+    "Clone dotfiles=>y" "no setup script found=>"
+rc=$?
+check "exits cleanly, says there's no setup script" test "$rc" -eq 0
+check "cloned" test -f "$H3/Developer/dotfiles/README.md"
 
 echo; echo "### Result: $pass passed, $fail failed"
 if ((fail == 0)); then

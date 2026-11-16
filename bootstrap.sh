@@ -7,13 +7,23 @@
 #
 # Installs Homebrew, creates this Mac's SSH key for GitHub, clones the private dotfiles and runs their
 # setup. Self-contained on purpose: nothing else is downloaded before the SSH key exists.
+#
+# Other dotfiles repos: set these before the command (defaults: the gtmn dotfiles)
+#   DOTFILES_REPO_URL  repo to clone over SSH            DOTFILES_DIR   where to clone it
+#   SSH_KEY_NAME       key file in ~/.ssh                SSH_KEY_LABEL  key comment: <label>@<Mac> YYYY-MM
+# The setup that runs after the clone: the first of SETUP_CANDIDATES found in the repo.
 # ====================================================================================================
 
 DOTFILES_REPO_URL="${DOTFILES_REPO_URL:-git@github.com:gtmn/dotfiles}"
-DOTFILES_DIR="$HOME/Developer/dotfiles"
+DOTFILES_DIR="${DOTFILES_DIR:-$HOME/Developer/dotfiles}"
+SSH_KEY_NAME="${SSH_KEY_NAME:-id_ed25519_personal}" # same key name as the "personal" context
+SSH_KEY_LABEL="${SSH_KEY_LABEL:-personal}"
 TILDE='~' # for ${path/#$HOME/$TILDE}: a literal ~ there works in bash 3.2 but becomes $HOME again in bash 5
-SSH_KEY_FILE="$HOME/.ssh/id_ed25519_personal"     # same key name as the "personal" context
-MACHINE_FILE="$HOME/.config/contexts/.machine"     # Mac label, shared with dots/lib/contexts.sh
+SSH_KEY_FILE="$HOME/.ssh/$SSH_KEY_NAME"
+MACHINE_FILE="$HOME/.config/contexts/.machine"     # Mac label, shared with dots/lib/contexts.sh (dots repos only)
+
+# Setup entry points, first found wins: dots (this tool), its old layout, then common names in other repos
+SETUP_CANDIDATES=(dots/dots setup/setup.sh install.sh setup.sh script/bootstrap script/setup)
 
 # shellcheck disable=SC2292
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -72,6 +82,13 @@ add_github_host_keys() {
     ((i > 0))
 }
 
+# Mac label from the key comment (<label>@<Mac> YYYY-MM) - for a key made by an earlier run
+machine_from_key() {
+    local comment
+    comment=$(awk '{ print $3 }' "$SSH_KEY_FILE.pub" 2> /dev/null)
+    [[ $comment == *@* ]] && echo "${comment#*@}"
+}
+
 github_auth_works() {
     ssh -T -o BatchMode=yes git@github.com 2>&1 | grep -q "successfully authenticated"
 }
@@ -100,9 +117,8 @@ if [[ -f "$SSH_KEY_FILE" ]]; then
     echo "Using existing SSH key ${SSH_KEY_FILE/#$HOME/$TILDE}"
 else
     machine=$(ask_for_value "Label for this Mac (shown in the SSH key comment)" "$(hostname -s)")
-    mkdir -p -m 700 "$(dirname "$MACHINE_FILE")" && echo "$machine" > "$MACHINE_FILE"
 
-    ssh-keygen -t ed25519 -f "$SSH_KEY_FILE" -C "personal@$machine $(date +%Y-%m)" || abort "Could not create the SSH key."
+    ssh-keygen -t ed25519 -f "$SSH_KEY_FILE" -C "$SSH_KEY_LABEL@$machine $(date +%Y-%m)" || abort "Could not create the SSH key."
     ssh-add --apple-use-keychain "$SSH_KEY_FILE"
 fi
 
@@ -121,6 +137,7 @@ until github_auth_works; do
     echo
     echo "Add this public key to GitHub (Settings -> SSH and GPG keys):"
     cat "$SSH_KEY_FILE.pub"
+    echo "Title: $(cut -d' ' -f3- "$SSH_KEY_FILE.pub")  (Mac & month: tells this key apart from older ones)"
     confirm_yes "Copy it to the clipboard?" && pbcopy < "$SSH_KEY_FILE.pub"
     confirm_yes "Open GitHub's 'new SSH key' page?" && open "https://github.com/settings/ssh/new"
     confirm "Added the key - test the connection again [y/n]? " || abort "Add the SSH key, then re-run this script."
@@ -139,11 +156,33 @@ else
         git clone "$DOTFILES_REPO_URL" "$DOTFILES_DIR"
 fi
 
-# dots/dots since the tool/data split; setup/setup.sh in older versions of the dotfiles
-if [[ -x "$DOTFILES_DIR/dots/dots" ]]; then
-    confirm_yes "Run the dotfiles setup?" && "$DOTFILES_DIR/dots/dots" setup
-elif [[ -f "$DOTFILES_DIR/setup/setup.sh" ]]; then
-    confirm_yes "Run the dotfiles setup?" && bash "$DOTFILES_DIR/setup/setup.sh"
-else
-    abort "Dotfiles not found in $DOTFILES_DIR"
+[[ -d "$DOTFILES_DIR/.git" ]] || abort "Dotfiles not found in $DOTFILES_DIR"
+
+# dots asks contexts.sh for the Mac label - hand over the one the SSH key was made with
+if [[ -x "$DOTFILES_DIR/dots/dots" && ! -s "$MACHINE_FILE" ]]; then
+    machine=${machine:-$(machine_from_key)}
+    [[ -n $machine ]] && mkdir -p -m 700 "$(dirname "$MACHINE_FILE")" && echo "$machine" > "$MACHINE_FILE"
 fi
+
+setup=""
+for candidate in "${SETUP_CANDIDATES[@]}"; do
+    [[ -f "$DOTFILES_DIR/$candidate" ]] && setup=$candidate && break
+done
+
+case "$setup" in
+    "")
+        echo "Cloned to ${DOTFILES_DIR/#$HOME/$TILDE} - no setup script found (${SETUP_CANDIDATES[*]}): run its setup yourself"
+        ;;
+    dots/dots)
+        confirm_yes "Run the dotfiles setup (dots setup)?" && "$DOTFILES_DIR/dots/dots" setup
+        ;;
+    *)
+        if confirm_yes "Run the dotfiles setup ($setup)?"; then
+            if [[ -x "$DOTFILES_DIR/$setup" ]]; then
+                (cd "$DOTFILES_DIR" && "./$setup")
+            else
+                (cd "$DOTFILES_DIR" && bash "./$setup")
+            fi
+        fi
+        ;;
+esac
